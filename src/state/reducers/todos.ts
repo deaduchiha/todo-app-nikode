@@ -1,5 +1,5 @@
 import type { TAction, TState } from "@/types/todos";
-import { nanoid } from "nanoid"; // npm i nanoid (for unique id)
+import { nanoid } from "nanoid";
 
 export const initialState: TState = { todos: [], filter: "all", query: "" };
 

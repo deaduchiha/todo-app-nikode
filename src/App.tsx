@@ -11,7 +11,6 @@ const App = () => {
     <main className="mx-auto max-w-xl p-4">
       <Card className="p-4 space-y-4">
         <TodoForm dispatch={dispatch} />
-
         <TodoList state={state} dispatch={dispatch} />
       </Card>
     </main>

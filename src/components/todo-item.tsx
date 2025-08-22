@@ -1,13 +1,14 @@
 import type { TAction, TTodo } from "@/types/todos";
 import { Checkbox } from "./ui/checkbox";
 import { Button } from "./ui/button";
+import type { Dispatch } from "react";
 
 const TodoItem = ({
   todo,
   dispatch,
 }: {
   todo: TTodo;
-  dispatch: React.Dispatch<TAction>;
+  dispatch: Dispatch<TAction>;
 }) => {
   return (
     <li className="flex items-center  gap-3 justify-between rounded-md border p-2">
