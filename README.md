@@ -438,6 +438,9 @@ export default function TodoItem({
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Delete this todo?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This action cannot be undone.
+              </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
