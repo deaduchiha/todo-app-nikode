@@ -16,9 +16,6 @@ bunx --bun shadcn@latest add button input checkbox switch card scroll-area dialo
 # Also add nanoid for id generation
 bun add nanoid
 ```
-
-> **Note:** If you are on **Next.js App Router**, add the Sonner/Toast provider in `app/layout.tsx`. If you are on **Vite/CRA**, render `<Toaster />` in `App.tsx`.
-
 ---
 
 ## 1) Folder structure
