@@ -6,6 +6,7 @@ import TodoList from "./components/todo-list";
 
 const App = () => {
   const [state, dispatch] = useReducer(reducer, initialState);
+  console.log(state);
 
   return (
     <main className="mx-auto max-w-xl p-4">

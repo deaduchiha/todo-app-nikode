@@ -1,53 +1,59 @@
 # Phase 1 — Advanced Todo App with shadcn/ui + Tailwind
 
-- Add **shadcn/ui preset** later via shadcn installation.
+This README is your hands-on workshop package. It includes working code (TypeScript + React), inline comments, and short explanations for each block. Copy files as-is, then advance session by session.
 
-1. Install shadcn/ui:
-
-```bash
-bunx --bun shadcn@latest add button input checkbox switch card scroll-area dialog alert-dialog badge separator sonner
-```
-
-> Note: shadcn/ui components go into `components/ui/*`. Dark mode is managed by applying `dark` class on `<html>` or via your own provider.
+> **Package manager:** uses **Bun** in all commands.
+> **UI kit:** shadcn/ui components under `components/ui/*`.
 
 ---
 
-## Session 1 — Setup & Skeleton
+## 0) Install dependencies & shadcn/ui
 
-**Final output:** Display todo list + add form.
+```bash
+# Add shadcn/ui components you’ll need in Phase 1
+bunx --bun shadcn@latest add button input checkbox switch card scroll-area dialog alert-dialog badge separator sonner
 
-### Before coding (10 min)
+# Also add nanoid for id generation
+bun add nanoid
+```
 
-- Review architecture: **state → UI** using `useReducer` at the app root.
-- Folder structure:
+> **Note:** If you are on **Next.js App Router**, add the Sonner/Toast provider in `app/layout.tsx`. If you are on **Vite/CRA**, render `<Toaster />` in `App.tsx`.
+
+---
+
+## 1) Folder structure
 
 ```
 src/App.tsx
 src/components/todo-form.tsx
 src/components/todo-list.tsx
 src/components/todo-item.tsx
+src/lib/storage.ts
 src/state/reducers/todos.ts
 src/types/todos.ts
 ```
 
-### Workshop steps
+---
 
-1. **Define types and state**
-   `src/types/todos.ts`
+## 2) Types & State — `src/types/todos.ts`
+
+**What & why:** Centralizes shared types (todo item, filter, reducer’s state/actions) to prevent drift and improve maintainability.
 
 ```ts
+// src/types/todos.ts
 export type TTodo = {
   id: string;
   title: string;
   done: boolean;
-  createdAt: number;
+  createdAt: number; // epoch ms for sorting/analytics
 };
+
 export type TFilter = "all" | "active" | "done";
 
 export type TState = {
-  todos: Todo[];
-  filter: Filter;
-  query: string; // used in Session 3
+  todos: TTodo[];
+  filter: TFilter;
+  query: string; // used for search
 };
 
 export type TAction =
@@ -55,35 +61,37 @@ export type TAction =
   | { type: "TOGGLE_TODO"; id: string }
   | { type: "EDIT_TODO"; id: string; title: string }
   | { type: "REMOVE_TODO"; id: string }
-  | { type: "SET_FILTER"; filter: Filter }
+  | { type: "SET_FILTER"; filter: TFilter }
   | { type: "SET_QUERY"; query: string };
 ```
 
-2. **Reducer skeleton**
-   `state/reducers/todos.ts`
+---
+
+## 3) Reducer — `src/state/reducers/todos.ts`
+
+**What & why:** A pure reducer with **immutable** updates keeps business logic predictable, easy to test, and scalable.
 
 ```ts
-import type { TAction, TState } from "@/types/todos";
-import { nanoid } from "nanoid"; // bun add nanoid
+// src/state/reducers/todos.ts
+import type { TAction, TState, TTodo } from "@/types/todos";
+import { nanoid } from "nanoid";
 
-export const initialState: State = { todos: [], filter: "all", query: "" };
+export const initialState: TState = { todos: [], filter: "all", query: "" };
 
-export function reducer(state: State, action: Action): State {
+export function reducer(state: TState, action: TAction): TState {
   switch (action.type) {
-    case "ADD_TODO":
-      if (!action.title.trim()) return state;
-      return {
-        ...state,
-        todos: [
-          {
-            id: nanoid(),
-            title: action.title.trim(),
-            done: false,
-            createdAt: Date.now(),
-          },
-          ...state.todos,
-        ],
+    case "ADD_TODO": {
+      const title = action.title.trim();
+      if (!title) return state; // guard: no empty todos
+      const next: TTodo = {
+        id: nanoid(),
+        title,
+        done: false,
+        createdAt: Date.now(),
       };
+      return { ...state, todos: [next, ...state.todos] };
+    }
+
     case "TOGGLE_TODO":
       return {
         ...state,
@@ -91,6 +99,7 @@ export function reducer(state: State, action: Action): State {
           t.id === action.id ? { ...t, done: !t.done } : t
         ),
       };
+
     case "EDIT_TODO":
       return {
         ...state,
@@ -98,35 +107,151 @@ export function reducer(state: State, action: Action): State {
           t.id === action.id ? { ...t, title: action.title } : t
         ),
       };
+
     case "REMOVE_TODO":
       return { ...state, todos: state.todos.filter((t) => t.id !== action.id) };
+
     case "SET_FILTER":
       return { ...state, filter: action.filter };
+
     case "SET_QUERY":
       return { ...state, query: action.query };
+
     default:
       return state;
   }
 }
 ```
 
-3. **App + useReducer provider**
-   `src/App.tsx`
+**Key choices:**
+
+- Prevent empty todos.
+- Prepend new items so recent tasks appear on top.
+- Zero mutations; always return new arrays/objects.
+
+---
+
+## 4) Local persistence helpers — `src/lib/storage.ts`
+
+**What & why:** Encapsulates LocalStorage I/O, keeps components clean, makes it testable.
+
+```ts
+// src/lib/storage.ts
+import type { TState } from "@/types/todos";
+
+const KEY = "todos:v1";
+
+export const loadState = (): TState | null => {
+  if (typeof window === "undefined") return null; // SSR safety
+  try {
+    return JSON.parse(localStorage.getItem(KEY) || "null");
+  } catch {
+    return null;
+  }
+};
+
+export const saveState = (s: TState) => {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(KEY, JSON.stringify(s));
+};
+```
+
+---
+
+## 5) App shell — `src/App.tsx`
+
+**What & why:** Hosts the reducer, wires persistence, provides layout, and renders Form + List. Also mounts Sonner `<Toaster />` for toasts.
 
 ```tsx
-import { useReducer } from "react";
+// src/App.tsx
+import { useEffect, useMemo, useReducer } from "react";
 import { initialState, reducer } from "./state/reducers/todos";
+import type { TAction, TState, TFilter } from "./types/todos";
 import { Card } from "./components/ui/card";
 import TodoForm from "./components/todo-form";
 import TodoList from "./components/todo-list";
+import { Separator } from "./components/ui/separator";
+import { Badge } from "./components/ui/badge";
+import { Toaster } from "./components/ui/sonner"; // shadcn sonner export
+import { loadState, saveState } from "./lib/storage";
+
+// Debounce helper to avoid frequent writes
+function useDebouncedSave(state: TState, delay = 300) {
+  useEffect(() => {
+    const t = setTimeout(() => saveState(state), delay);
+    return () => clearTimeout(t);
+  }, [state, delay]);
+}
 
 export default function App() {
-  const [state, dispatch] = useReducer(reducer, initialState);
+  // Hydrate from LocalStorage (once)
+  const bootState = useMemo(() => loadState() ?? initialState, []);
+  const [state, dispatch] = useReducer(reducer, bootState);
+
+  // Persist with debounce
+  useDebouncedSave(state);
+
+  // Derived counts for UI badges
+  const active = state.todos.filter((t) => !t.done).length;
+  const done = state.todos.length - active;
+
+  const setFilter = (f: TFilter) => dispatch({ type: "SET_FILTER", filter: f });
 
   return (
     <main className="mx-auto max-w-xl p-4">
+      {/* Sonner toaster (Vite/CRA). If Next.js App Router, put <Toaster/> in app/layout.tsx */}
+      <Toaster />
+
       <Card className="p-4 space-y-4">
+        <header className="flex flex-col gap-2">
+          <h1 className="text-2xl font-semibold">Advanced Todo</h1>
+          <div className="flex items-center gap-2 text-sm opacity-80">
+            <Badge variant="secondary">All: {state.todos.length}</Badge>
+            <Badge variant="secondary">Active: {active}</Badge>
+            <Badge variant="secondary">Done: {done}</Badge>
+          </div>
+          <Separator />
+        </header>
+
         <TodoForm dispatch={dispatch} />
+
+        {/* Filters & search (Session 3). Keep here for a compact header */}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            className={`px-3 py-1 rounded-md border ${
+              state.filter === "all" ? "bg-muted" : ""
+            }`}
+            onClick={() => setFilter("all")}
+          >
+            All
+          </button>
+          <button
+            className={`px-3 py-1 rounded-md border ${
+              state.filter === "active" ? "bg-muted" : ""
+            }`}
+            onClick={() => setFilter("active")}
+          >
+            Active
+          </button>
+          <button
+            className={`px-3 py-1 rounded-md border ${
+              state.filter === "done" ? "bg-muted" : ""
+            }`}
+            onClick={() => setFilter("done")}
+          >
+            Done
+          </button>
+
+          <input
+            placeholder="Search…"
+            className="ml-auto w-40 px-3 py-1 rounded-md border"
+            value={state.query}
+            onChange={(e) =>
+              dispatch({ type: "SET_QUERY", query: e.currentTarget.value })
+            }
+          />
+        </div>
+
         <TodoList state={state} dispatch={dispatch} />
       </Card>
     </main>
@@ -134,22 +259,54 @@ export default function App() {
 }
 ```
 
-4. **Add form with shadcn/ui**
-   `components/todo-form.tsx`
+**Why these choices:**
+
+- Loads once from LocalStorage to avoid SSR/hydration issues.
+- Debounced persistence prevents noisy writes.
+- Keeps filter/query controls close to the list for a focused UX.
+
+---
+
+## 6) Add form — `src/components/todo-form.tsx`
+
+**What & why:** Minimal, keyboard-first form. Uses `ref` for instant reset/focus. Shows toast for validation (Session 1 homework integrated).
 
 ```tsx
-import { FormEvent, useRef } from "react";
+// src/components/todo-form.tsx
+import type { TAction } from "@/types/todos";
+import { useRef, type Dispatch, type FormEvent } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/sonner";
 
-export default function TodoForm({ dispatch }: { dispatch: any }) {
+const MAX_LEN = 100;
+
+export default function TodoForm({
+  dispatch,
+}: {
+  dispatch: Dispatch<TAction>;
+}) {
   const ref = useRef<HTMLInputElement>(null);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     const v = ref.current?.value ?? "";
-    dispatch({ type: "ADD_TODO", title: v });
-    if (ref.current) ref.current.value = "";
+    const title = v.trim();
+    if (!title) {
+      toast.error("Title can’t be empty");
+      return;
+    }
+    if (title.length > MAX_LEN) {
+      toast.error(`Max ${MAX_LEN} characters`);
+      return;
+    }
+
+    dispatch({ type: "ADD_TODO", title });
+    if (ref.current) {
+      ref.current.value = ""; // clear
+      ref.current.focus(); // auto-focus (Session 2)
+    }
+    toast.success("Todo added");
   };
 
   return (
@@ -161,243 +318,234 @@ export default function TodoForm({ dispatch }: { dispatch: any }) {
 }
 ```
 
-5. **List & item**
-   `components/todo-list.tsx`
+---
+
+## 7) List & Item — `src/components/todo-list.tsx` + `src/components/todo-item.tsx`
+
+**What & why:** `TodoList` handles filtering + searching, and renders to a scrollable area. `TodoItem` focuses on single-item interactions and UX feedback.
 
 ```tsx
-import type { TAction, TState } from "@/types/todos";
+// src/components/todo-list.tsx
+import type { TAction, TState, TTodo } from "@/types/todos";
 import TodoItem from "./todo-item";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Dispatch } from "react";
+
+function applyFilterAndSearch(todos: TTodo[], state: TState) {
+  let rows = todos;
+  // filter
+  if (state.filter === "active") rows = rows.filter((t) => !t.done);
+  if (state.filter === "done") rows = rows.filter((t) => t.done);
+  // search
+  const q = state.query.trim().toLowerCase();
+  if (q) rows = rows.filter((t) => t.title.toLowerCase().includes(q));
+  return rows;
+}
 
 export default function TodoList({
   state,
   dispatch,
 }: {
-  state: State;
+  state: TState;
   dispatch: Dispatch<TAction>;
 }) {
+  const rows = applyFilterAndSearch(state.todos, state);
+
   return (
     <ScrollArea className="h-96 pr-3">
-      <ul className="space-y-2">
-        {state.todos.map((t) => (
-          <TodoItem key={t.id} todo={t} dispatch={dispatch} />
-        ))}
-      </ul>
+      {rows.length === 0 ? (
+        <p className="text-sm opacity-70 p-2">
+          No items. Add your first task ✨
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {rows.map((t) => (
+            <TodoItem key={t.id} todo={t} dispatch={dispatch} />
+          ))}
+        </ul>
+      )}
     </ScrollArea>
   );
 }
 ```
 
-`components/todo-item.tsx`
-
 ```tsx
+// src/components/todo-item.tsx
 import type { TAction, TTodo } from "@/types/todos";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import type { Dispatch } from "react";
+import { toast } from "@/components/ui/sonner";
 
 export default function TodoItem({
   todo,
   dispatch,
 }: {
-  todo: Todo;
+  todo: TTodo;
   dispatch: Dispatch<TAction>;
 }) {
+  const onToggle = () => {
+    dispatch({ type: "TOGGLE_TODO", id: todo.id });
+  };
+
+  const onEdit = () => {
+    const title = prompt("Edit title:", todo.title) ?? todo.title; // simple inline edit
+    if (title.trim() !== todo.title.trim()) {
+      dispatch({ type: "EDIT_TODO", id: todo.id, title: title.trim() });
+      toast.success("Todo updated");
+      // Smooth scroll to the edited item
+      document
+        .getElementById(todo.id)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  };
+
+  const onDelete = () => {
+    dispatch({ type: "REMOVE_TODO", id: todo.id });
+    toast("Todo deleted");
+  };
+
   return (
-    <li className="flex items-center  gap-3 justify-between rounded-md border p-2">
+    <li
+      id={todo.id}
+      className="flex items-center gap-3 justify-between rounded-md border p-2 transition-all"
+    >
       <div className="flex items-center gap-3">
-        <Checkbox
-          checked={todo.done}
-          onCheckedChange={() => dispatch({ type: "TOGGLE_TODO", id: todo.id })}
-        />
+        <Checkbox checked={todo.done} onCheckedChange={onToggle} />
         <span className={todo.done ? "line-through opacity-60" : ""}>
           {todo.title}
         </span>
       </div>
       <div className="flex gap-2">
-        <Button
-          variant="secondary"
-          onClick={() => {
-            const title = prompt("Edit title:", todo.title) ?? todo.title;
-            dispatch({ type: "EDIT_TODO", id: todo.id, title });
-          }}
-        >
+        <Button variant="secondary" onClick={onEdit}>
           Edit
         </Button>
-        <Button
-          variant="destructive"
-          onClick={() => dispatch({ type: "REMOVE_TODO", id: todo.id })}
-        >
-          Delete
-        </Button>
+
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive">Delete</Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this todo?</AlertDialogTitle>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onDelete}>Delete</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </li>
   );
 }
 ```
 
-### Session 1 delivery checklist
+**Why these choices:**
 
-- [ ] Basic CRUD works (add/remove/toggle/edit).
-- [ ] No empty item is added.
-- [ ] React console is warning-free.
-
-### Homework challenge (Session 1)
-
-- **Validation:** show a `toast` error if input is empty (use shadcn/ui sonner).
+- `AlertDialog` prevents accidental deletions.
+- `scrollIntoView` helps users keep context after edits.
+- Lightweight inline edit avoids extra component state for Phase 1.
 
 ---
 
-## Session 2 — Context + Ref + Persistence
+## 8) Session checklists & homework
 
-**Final output:** Dark/light theme + localStorage persistence + auto-focus after add.
-**Duration:** 90 min
+### Session 1 — Setup & Skeleton
 
-### Workshop steps
+**Final output:** Display todo list + add form.
 
-1. **ThemeContext + toggle**
-   `contexts/ThemeContext.tsx`
+- [x] Basic CRUD (add/remove/toggle/edit) works.
+- [x] No empty item is added.
+- [x] React console is warning-free.
 
-```tsx
-"use client";
-import { createContext, useContext, useEffect, useState } from "react";
+**Homework:**
 
-type Theme = "light" | "dark";
-const ThemeCtx = createContext<{ theme: Theme; toggle: () => void }>({
-  theme: "light",
-  toggle: () => {},
-});
-
-export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setTheme] = useState<Theme>("light");
-  useEffect(() => {
-    document.documentElement.classList.toggle("dark", theme === "dark");
-  }, [theme]);
-  return (
-    <ThemeCtx.Provider
-      value={{
-        theme,
-        toggle: () => setTheme((t) => (t === "light" ? "dark" : "light")),
-      }}
-    >
-      {children}
-    </ThemeCtx.Provider>
-  );
-}
-export const useTheme = () => useContext(ThemeCtx);
-```
-
-- Wrap `ThemeProvider` around children in `app/layout.tsx`.
-- Add theme toggle in `App.tsx` with `Switch` + `Separator`.
-
-2. **Persist with localStorage**
-   `lib/todos/storage.ts`
-
-```ts
-import { State } from "./types";
-const KEY = "todos:v1";
-export const loadState = (): State | null => {
-  if (typeof window === "undefined") return null;
-  try {
-    return JSON.parse(localStorage.getItem(KEY) || "null");
-  } catch {
-    return null;
-  }
-};
-export const saveState = (s: State) => {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(KEY, JSON.stringify(s));
-};
-```
-
-- In `App.tsx`, initialize from `loadState()`, save on every change.
-
-3. **useRef for auto-focus**
-   After adding, reset focus on input:
-
-   ```tsx
-   if (ref.current) ref.current.focus();
-   ```
-
-### Homework (Session 2)
-
-- Debounce saving to localStorage (setTimeout + cleanup in `useEffect`).
-
-### Session 2 delivery checklist
-
-- [ ] Dark/light theme toggle with `Switch`.
-- [ ] Data persists across refresh.
-- [ ] Input auto-focuses after adding.
+- Validation toast for empty input (implemented in `TodoForm`).
+- Trim and enforce max length (implemented).
 
 ---
 
-## Session 3 — Filters / Search + UX
+### Session 2 — Ref + Persistence
 
-**Final output:** Filter (All / Active / Done) + Search + smooth scroll to edited item.
-**Duration:** 90–120 minutes
+**Final output:** LocalStorage persistence + auto-focus after add.
 
-### Workshop steps
+- [x] Persist with LocalStorage (`lib/storage.ts`).
+- [x] Debounced save via `useDebouncedSave` in `App.tsx`.
+- [x] Auto-focus after add (in `TodoForm`).
 
-1. Add filter/search controls in header.
-2. Filter + query handling in `TodoList` (optionally `useMemo`).
-3. Smooth scroll to edited item using `scrollIntoView`.
-4. Confirm delete with `AlertDialog`.
-5. Toast feedback for add/edit/delete actions.
+**Homework:**
 
-### Homework (Session 3)
-
-- Animate item entry/exit with Tailwind transitions.
-
-### Session 3 delivery checklist
-
-- [ ] Filter + search fully functional.
-- [ ] Smooth scroll after edit.
-- [ ] Simple animations for items.
+- Already included: debounced save.
 
 ---
 
-## Mapping to shadcn/ui components (quick reference)
+### Session 3 — Filters / Search + UX
+
+**Final output:** Filter (All / Active / Done) + Search + smooth scroll + confirm delete + toasts.
+
+- [x] Filter + search implemented in `TodoList`.
+- [x] Smooth scroll to edited item in `TodoItem`.
+- [x] `AlertDialog` confirm on delete.
+- [x] Toast feedback for actions.
+- [ ] **Stretch:** Animate item entry/exit with Tailwind (`transition`, `opacity`, `translate-y` classes or Framer Motion).
+
+**Hint for simple animations:**
+
+- Add `transition`, `duration-200`, and conditional `opacity-0`/`opacity-100` classes when mounting/unmounting with a small key-based trick, or switch to Framer Motion `AnimatePresence` for more control.
+
+---
+
+## 9) Mapping to shadcn/ui components (quick reference)
 
 - **Form:** `Input`, `Button`
 - **Item:** `Checkbox`, `Button (secondary/destructive)`
 - **Layout:** `Card`, `ScrollArea`, `Separator`
-- **Theme:** `Switch`
-- **Feedback:** `Toast`, `AlertDialog`
-- **Meta:** `Badge` for counters (e.g., active count)
+- **Feedback:** `sonner` (`toast`, `<Toaster />`), `AlertDialog`
+- **Meta:** `Badge` for counters (active/done counts)
 
 ---
 
-## Acceptance criteria for Phase 1 (to demo live)
+## 10) Acceptance criteria for Phase 1 (live demo)
 
-- Full CRUD with no console errors
-- Stable dark/light theme (persisted)
-- LocalStorage sync (load once + save on change + debounce)
-- Accurate search/filter
-- UX niceties: auto-focus, confirm delete, smooth scroll, light animations
-
----
-
-## Teaching notes & common pitfalls
-
-- **Next.js hydration:** only access `window/localStorage` in client code.
-- **Keys:** always `key={todo.id}`, never list index.
-- **Immutable reducer:** don’t mutate state.
-- **ToastProvider:** must be added in `app/layout.tsx`.
-- **Dark mode:** Tailwind config should use `dark: "class"`.
+- Full CRUD with no console errors.
+- LocalStorage load + debounced save.
+- Accurate search/filter.
+- UX niceties: auto-focus, confirm delete, smooth scroll, basic animations (optional).
 
 ---
 
-## Optional final challenge (+1 grade)
+## 11) Teaching notes & common pitfalls
 
-- Inline edit with `Input` + Enter/ESC confirm.
-- Empty state card with “Add your first task” prompt.
-- Export/Import JSON for tasks.
+- **SSR safety:** Only access `window/localStorage` on the client.
+- **Keys:** always `key={todo.id}`, never array index.
+- **Reducer purity:** don’t mutate arrays/objects.
+- **Toast provider:**
+
+  - **Next.js**: add `<Toaster />` to `app/layout.tsx`.
+  - **Vite/CRA**: render `<Toaster />` once in `App.tsx`.
 
 ---
 
-👉 If you want, I can also prepare a **starter project skeleton** (files + reducer + blank UI) for your students to begin with.
+## 12) Optional final challenge (+1 grade)
 
----
+- Inline edit with editable `<Input>` and Enter/ESC handling.
+- Empty state card with “Add your first task”.
+- Export/Import JSON of tasks (download/upload file).
 
-Would you like me to also **translate the checklists and challenges into simple student-friendly English phrasing** (less technical, more instructional)?
+**Export/Import sketch:**
+
+```ts
+// Export: create a Blob(JSON.stringify(state.todos)) and download via <a download>
+// Import: <input type="file" accept="application/json">, parse JSON, dispatch add/replace
+```

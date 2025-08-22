@@ -1,9 +1,9 @@
 import type { TAction } from "@/types/todos";
-import { useRef } from "react";
+import { useRef, type Dispatch } from "react";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 
-const TodoForm = ({ dispatch }: { dispatch: React.Dispatch<TAction> }) => {
+const TodoForm = ({ dispatch }: { dispatch: Dispatch<TAction> }) => {
   const ref = useRef<HTMLInputElement>(null);
 
   const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
